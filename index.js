@@ -27,7 +27,7 @@ async function checkTableExists(table){
 }
 async function createTable(table){
   try{
-    let sql = `CREATE TABLE IF NOT EXISTS "${table}" (id TEXT PRIMARY KEY, data TEXT NOT NULL, ttl INTEGER)`
+    let sql = `CREATE TABLE IF NOT EXISTS "${table}" (id TEXT PRIMARY KEY, gameVersion TEXT, localeVersion TEXT, assetVersion TEXT, data TEXT NOT NULL, ttl INTEGER)`
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
       log.error(dataResults?.getFirstError())
@@ -112,16 +112,33 @@ async function get(table, key){
     log.error(e)
   }
 }
-async function set(table, key, value){
+async function getVersions(table, key){
   try{
-    if(!table || !key || !value) return
+    if(!table) return
+    let status = await checkTableExists(table)
+    if(!status) return
+
+    let sql = `SELECT gameVersion, localeVersion, assetVersion from "${table}"`
+    let dataResults = await dataApiClient.query(sql)
+    if(dataResults.hasError()){
+      log.error(dataResults?.getFirstError())
+      return
+    }
+    return dataResults?.get(0)?.toObject()
+  }catch(e){
+    log.error(e)
+  }
+}
+async function set(table, key, { gameVersion, localeVersion, assetVersion, data }){
+  try{
+    if(!table || !key || !data) return
     let status = await tableCheck(table)
     if(!status){
       log.error(`Could not create gamedata table for ${table}`)
       return
     }
     let sql = [
-      [`INSERT INTO "${table}" (id, data, ttl) VALUES(:id, :data, ${Date.now()}) ON CONFLICT(id) DO UPDATE set data=:data, ttl=${Date.now()}`, { id: key.toString(), data: JSON.stringify(value) }]
+      [`INSERT OR REPLACE INTO "${table}" (id, gameVersion, localeVersion, assetVersion, data, ttl) VALUES(:id, :gameVersion, :localeVersion, :assetVersion, :data, ${Date.now()})`, { id: key.toString(), gameVersion, localeVersion, assetVersion, data: JSON.stringify(data) }]
     ]
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
@@ -134,4 +151,4 @@ async function set(table, key, value){
   }
 }
 
-module.exports = { all, del, get, set }
+module.exports = { all, del, get, getVersions, set }
