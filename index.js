@@ -63,7 +63,7 @@ async function all(table){
       log.error(dataResults?.getFirstError())
       return
     }
-    let result = dataResults?.toArray()?.filter(x=>x.?.data)
+    let result = dataResults?.toArray()?.filter(x=>x?.data)
     if(result?.length > 0){
       let res = {}
       for(let i in result){
@@ -82,7 +82,7 @@ async function del(table, key){
     let status = await checkTableExists(table)
     if(!status) return
 
-    let sql = `DELETE FROM "${table}" WHERE id=${key.toString()}`
+    let sql = `DELETE FROM "${table}" WHERE id="${key.toString()}"`
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
       log.error(dataResults?.getFirstError())
@@ -100,7 +100,7 @@ async function get(table, key){
     let status = await checkTableExists(table)
     if(!status) return
 
-    let sql = `SELECT data FROM "${table}" WHERE id=${key?.toString()}`
+    let sql = `SELECT data FROM "${table}" WHERE id="${key?.toString()}"`
     let dataResults = await dataApiClient.query(sql)
     if(dataResults.hasError()){
       log.error(dataResults?.getFirstError())
@@ -112,16 +112,34 @@ async function get(table, key){
     log.error(e)
   }
 }
-async function getVersions(table, key){
+async function getIds(table){
   try{
     if(!table) return
     let status = await checkTableExists(table)
     if(!status) return
 
-    let sql = `SELECT gameVersion, localeVersion, assetVersion from "${table}"`
+    let sql = `SELECT id FROM "${table}"`
     let dataResults = await dataApiClient.query(sql)
     if(dataResults.hasError()){
       log.error(dataResults?.getFirstError())
+      return
+    }
+    return dataResults?.toArray()?.filter(x=>x?.id)?.map(x=>x.id)
+  }catch(e){
+    log.error(e)
+  }
+}
+async function getVersions(table, key){
+  try{
+    if(!table || !key) return
+    let status = await checkTableExists(table)
+    if(!status) return
+
+    let sql = `SELECT gameVersion, localeVersion, assetVersion from "${table}" WHERE id="${key.toString()}"`
+
+    let dataResults = await dataApiClient.query(sql)
+    if(dataResults.hasError()){
+      slog.error(dataResults?.getFirstError())
       return
     }
     return dataResults?.get(0)?.toObject()
@@ -138,7 +156,7 @@ async function set(table, key, { gameVersion, localeVersion, assetVersion, data 
       return
     }
     let sql = [
-      [`INSERT OR REPLACE INTO "${table}" (id, gameVersion, localeVersion, assetVersion, data, ttl) VALUES(:id, :gameVersion, :localeVersion, :assetVersion, :data, ${Date.now()})`, { id: key.toString(), gameVersion, localeVersion, assetVersion, data: JSON.stringify(data) }]
+      [`INSERT OR REPLACE INTO "${table}" (id, gameVersion, localeVersion, assetVersion, data, ttl) VALUES(:id, :gameVersion, :localeVersion, :assetVersion, :data, ${Date.now()})`, { id: key.toString(), gameVersion, localeVersion, assetVersion: assetVersion, data: JSON.stringify(data) }]
     ]
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
@@ -151,4 +169,4 @@ async function set(table, key, { gameVersion, localeVersion, assetVersion, data 
   }
 }
 
-module.exports = { all, del, get, getVersions, set }
+module.exports = { all, del, get, getVersions, set, tableCheck }

@@ -1,3 +1,4 @@
+let logLevel = process.env.LOG_LEVEL || 'info';
 function getTimeStamp(timestamp){
   if(!timestamp) timestamp = Date.now()
   let dateTime = new Date(timestamp)
@@ -6,7 +7,7 @@ function getTimeStamp(timestamp){
 export function error(err, table_name){
   try{
     console.error(`${getTimeStamp(Date.now())} ERROR [data-cache] ${err}`)
-    if(err?.stack) console.error(err)
+    if(err?.stack && logLevel == 'debug') console.error(err)
   }catch(e){
     console.error(e)
   }
