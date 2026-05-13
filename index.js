@@ -27,7 +27,7 @@ async function checkTableExists(table){
 }
 async function createTable(table){
   try{
-    let sql = `CREATE TABLE IF NOT EXISTS "${table}" (id TEXT PRIMARY KEY, gameVersion TEXT, localeVersion TEXT, assetVersion TEXT, data TEXT NOT NULL, ttl INTEGER)`
+    let sql = `CREATE TABLE IF NOT EXISTS "${table}" (id TEXT PRIMARY KEY, data TEXT NOT NULL, ttl INTEGER)`
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
       log.error(dataResults?.getFirstError())
@@ -129,25 +129,8 @@ async function getIds(table){
     log.error(e)
   }
 }
-async function getVersions(table, key){
-  try{
-    if(!table || !key) return
-    let status = await checkTableExists(table)
-    if(!status) return
 
-    let sql = `SELECT gameVersion, localeVersion, assetVersion from "${table}" WHERE id="${key.toString()}"`
-
-    let dataResults = await dataApiClient.query(sql)
-    if(dataResults.hasError()){
-      slog.error(dataResults?.getFirstError())
-      return
-    }
-    return dataResults?.get(0)?.toObject()
-  }catch(e){
-    log.error(e)
-  }
-}
-async function set(table, key, { gameVersion, localeVersion, assetVersion, data }){
+async function set(table, key, data){
   try{
     if(!table || !key || !data) return
     let status = await tableCheck(table)
@@ -156,17 +139,17 @@ async function set(table, key, { gameVersion, localeVersion, assetVersion, data 
       return
     }
     let sql = [
-      [`INSERT OR REPLACE INTO "${table}" (id, gameVersion, localeVersion, assetVersion, data, ttl) VALUES(:id, :gameVersion, :localeVersion, :assetVersion, :data, ${Date.now()})`, { id: key.toString(), gameVersion, localeVersion, assetVersion: assetVersion, data: JSON.stringify(data) }]
+      [`INSERT OR REPLACE INTO "${table}" (id, data, ttl) VALUES(:id, :data, ${Date.now()})`, { id: key.toString(), data: JSON.stringify(data) }]
     ]
     let dataResults = await dataApiClient.execute(sql)
     if(dataResults?.hasError()){
       log.error(dataResults?.getFirstError())
       return
     }
-    return dataResults?.get(0)?.getLastInsertId()
+    if(dataResults?.get(0)?.getRowsAffected() >= 0) return true
   }catch(e){
     log.error(e)
   }
 }
 
-module.exports = { all, del, get, getVersions, set, tableCheck }
+module.exports = { all, del, get, set, tableCheck }
