@@ -1,155 +1,146 @@
 'use strict'
-const { DataApiClient } = require('rqlite-js')
 const log = require('./logger')
 
-const CACHE_HOSTS = process.env.REACTION_CACHE_URL || ['http://data-cache-0.data-cache-internal.datastore.svc.cluster.local:4001', 'http://data-cache-1.data-cache-internal.datastore.svc.cluster.local:4001', 'http://data-cache-2.data-cache-internal.datastore.svc.cluster.local:4001']
-
-const dataApiClient = new DataApiClient(CACHE_HOSTS)
-let TABLE_SET = new Set()
-
-async function checkTableExists(table){
+const { MongoClient } = require('mongodb');
+const connectionString = 'mongodb://mongo-data-rs0.datastore.svc.cluster.local/admin?replicaSet=rs0&ssl=false&compressors=zstd&retryReads=true&retryWrites=true'
+let mongo = new MongoClient(connectionString), mongo_ready = false, _dbo
+async function init(){
   try{
-    if(TABLE_SET.has(table)) return true
-
-    let sql = `SELECT name FROM sqlite_master WHERE type='table' AND name='${table}'`
-    let dataResults = await dataApiClient.query(sql)
-    if(dataResults?.hasError()){
-      log.error(dataResults?.getFirstError())
+    await mongo.connect()
+    let status = await mongo.db('admin').command({ ping: 1 })
+    if(status.ok > 0){
+      mongo_ready = true
+      _dbo = mongo.db('game_data')
+      log.info(`mongo connection successful...`)
       return
     }
-    if(dataResults?.get(0)?.data?.name == table){
-      TABLE_SET.add(table)
-      return true
-    }
+    setTimeout(init, 5000)
+  }catch(e){
+    log.error(e)
+    setTimeout(init, 5000)
+  }
+}
+init()
+async function aggregate( collection, matchCondition, data = []){
+  try{
+    if(matchCondition) data.unshift({$match: matchCondition})
+    return await _dbo.collection(collection).aggregate(data, { allowDiskUse: true }).toArray()
   }catch(e){
     log.error(e)
   }
 }
-async function createTable(table){
+async function all( collection, matchCondition, project ){
   try{
-    let sql = `CREATE TABLE IF NOT EXISTS "${table}" (id TEXT PRIMARY KEY, data TEXT NOT NULL, ttl INTEGER)`
-    let dataResults = await dataApiClient.execute(sql)
-    if(dataResults?.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
+    return await _dbo.collection( collection ).find( matchCondition, { projection: project } ).toArray()
+  }catch(e){
+    log.error(e)
+  }
+}
+async function del( collection, matchCondition ){
+  try{
+    return await _dbo.collection(collection).deleteOne(matchCondition)
+  }catch(e){
+    log.error(e)
+  }
+}
+async function delMany( collection, matchCondition ){
+  try{
+    return await _dbo.collection(collection).deleteMany(matchCondition)
+  }catch(e){
+    log.error(e)
+  }
+}
+async function count( collection, matchCondition ){
+  try{
+    return await _dbo.collection( collection ).countDocuments(matchCondition)
+  }catch(e){
+    log.error(e)
+  }
+}
+async function createIndex(collection, keys, opts = {}){
+  try{
+    if(!keys) throw('No index provided...')
+    //opts = { background: true, expireAfterSeconds: 600 }
+    return await _dbo.collection( collection ).createIndex(keys, opts)
+  }catch(e){
+    log.error(e)
+  }
+}
+async function dropIndex( collection, indexName){
+  try{
+    if(!collection || !indexName) return
+    let res = await _dbo.collection( collection ).dropIndex(indexName)
+    if(res?.ok) return true
+  }catch(e){
+    log.error(e)
+  }
+}
+async function get(collection, matchCondition, project){
+  try{
+    let res = await _dbo.collection( collection ).find( matchCondition, { projection: project } ).toArray()
+    if(res?.length > 0) return res[0]
+  }catch(e){
+    log.error(e)
+  }
+}
+
+async function listIndexes( collection ){
+  try{
+    return await _dbo.collection( collection ).listIndexes().toArray()
+  }catch(e){
+    log.error(e)
+  }
+}
+
+async function limit( collection, matchCondition, project, limitCount = 50 ){
+  try{
+    return await _dbo.collection( collection ).find( matchCondition, { projection: project } ).limit( limitCount ).toArray()
+  }catch(e){
+    log.error(e)
+  }
+}
+
+async function set( collection, matchCondition, data ){
+  try{
+    if(!data || !matchCondition || !collection) return
+    if(!data?.TTL) data.TTL = new Date()
+    let res = await _dbo.collection( collection ).updateOne( matchCondition, { $set: data }, { upsert: true } )
+    delete data.TTL
+    return res?.acknowledged
+  }catch(e){
+    log.error(e)
+  }
+}
+async function updateIndex( collection, keys, opts ){
+  try{
+    if(!collection || !keys || !opts?.name) return
+    let collections = await _dbo.listCollections()?.toArray()
+    let indexCollection = collections.find(x=>x.name == collection)
+    if(!indexCollection?.name){
+      let created = await _dbo.createCollection(collection)
+      if(created?.s?.namespace?.collection !== collection) return log.error(`error creating collection ${collection}...`)
+      log.debug(`collection ${collection} created...`)
     }
-    TABLE_SET.add(table)
+    let indexes = await listIndexes( collection )
+    let index = indexes?.find(x=>x.name == opts.name)
+    if(index?.key && JSON.stringify(index.key) == JSON.stringify(keys)){
+      if(!opts.expireAfterSeconds && !index.expireAfterSeconds) return true
+      if(opts.expireAfterSeconds && opts.expireAfterSeconds == index.expireAfterSeconds) return true
+      if(index.expireAfterSeconds && opts.expireAfterSeconds == index.expireAfterSeconds) return true
+    }
+    if(index?.name){
+      let dropped = await dropIndex(collection, opts.name)
+      if(!dropped) return log.error(`error dropping index index ${opts.name} for ${collection}...`)
+      log.debug(`dropped ${collection} index ${opts.name}...`)
+    }
+    let indexName = await createIndex( collection, keys, opts)
+    if(!indexName || indexName !== opts.name) return log.error(`error creating index ${opts.name} for ${collection}`)
+    log.debug(`created index ${opts.name} for ${collection}...`)
     return true
   }catch(e){
     log.error(e)
   }
 }
-async function tableCheck(table){
-  try{
-    if(!table) return;
-
-    let status = await checkTableExists(table)
-    if(!status) status = await createTable(table)
-
-    return status
-  }catch(e){
-    log.error(e)
-  }
+module.exports = {
+  aggregate, all, del, delMany, count, createIndex, get, listIndexes, limit, set, status: ()=>( mongo_ready ), updateIndex
 }
-async function all(table){
-  try{
-    if(!table) return
-    let status = await checkTableExists(table)
-    if(!status) return
-
-    let sql = `SELECT id, data FROM "${table}"`
-    let dataResults = await dataApiClient.query(sql)
-    if(dataResults.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
-    }
-    let result = dataResults?.toArray()?.filter(x=>x?.data)
-    if(result?.length > 0){
-      let res = {}
-      for(let i in result){
-        if(!result[i]?.id || !result[i]?.data) continue
-        res[result[i].id] = JSON.parse(result[i].data)
-      }
-      return res
-    }
-  }catch(e){
-    log.error(e)
-  }
-}
-async function del(table, key){
-  try{
-    if(!table) return
-    let status = await checkTableExists(table)
-    if(!status) return
-
-    let sql = `DELETE FROM "${table}" WHERE id="${key.toString()}"`
-    let dataResults = await dataApiClient.execute(sql)
-    if(dataResults?.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
-    }
-    return dataResults?.get(0)?.getRowsAffected()
-  }catch(e){
-    log.error(e)
-  }
-}
-
-async function get(table, key){
-  try{
-    if(!table) return
-    let status = await checkTableExists(table)
-    if(!status) return
-
-    let sql = `SELECT data FROM "${table}" WHERE id="${key?.toString()}"`
-    let dataResults = await dataApiClient.query(sql)
-    if(dataResults.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
-    }
-    let result = dataResults?.get(0)
-    if(result?.data?.data) return JSON.parse(result?.data?.data)
-  }catch(e){
-    log.error(e)
-  }
-}
-async function getIds(table){
-  try{
-    if(!table) return
-    let status = await checkTableExists(table)
-    if(!status) return
-
-    let sql = `SELECT id FROM "${table}"`
-    let dataResults = await dataApiClient.query(sql)
-    if(dataResults.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
-    }
-    return dataResults?.toArray()?.filter(x=>x?.id)?.map(x=>x.id)
-  }catch(e){
-    log.error(e)
-  }
-}
-
-async function set(table, key, data){
-  try{
-    if(!table || !key || !data) return
-    let status = await tableCheck(table)
-    if(!status){
-      log.error(`Could not create gamedata table for ${table}`)
-      return
-    }
-    let sql = [
-      [`INSERT OR REPLACE INTO "${table}" (id, data, ttl) VALUES(:id, :data, ${Date.now()})`, { id: key.toString(), data: JSON.stringify(data) }]
-    ]
-    let dataResults = await dataApiClient.execute(sql)
-    if(dataResults?.hasError()){
-      log.error(dataResults?.getFirstError())
-      return
-    }
-    if(dataResults?.get(0)?.getRowsAffected() >= 0) return true
-  }catch(e){
-    log.error(e)
-  }
-}
-
-module.exports = { all, del, get, set, tableCheck }

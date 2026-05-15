@@ -4,18 +4,26 @@ function getTimeStamp(timestamp){
   let dateTime = new Date(timestamp)
   return dateTime.toLocaleString('en-US', { timeZone: 'Etc/GMT+5', hour12: false })
 }
-export function error(err, table_name){
+function error(msg){
   try{
-    console.error(`${getTimeStamp(Date.now())} ERROR [data-cache] ${err}`)
-    if(err?.stack && logLevel == 'debug') console.error(err)
+    console.error(`${getTimeStamp(Date.now())} ERROR [data-cache] ${msg}`)
+    if(msg?.stack && logLevel == 'debug') console.error(msg)
   }catch(e){
     console.error(e)
   }
 }
-export function info(msg, table_name){
+function info(msg){
   try{
     console.log(`${getTimeStamp(Date.now())} INFO [data-cache] ${msg}`)
   }catch(e){
     console.error(e)
   }
 }
+function debug(msg){
+  try{
+    if(logLevel == 'debug') console.log(`${getTimeStamp(Date.now())} DEBUG [data-cache] ${msg}`)
+  }catch(e){
+    console.error(e)
+  }
+}
+module.exports = { error, debug, info }
