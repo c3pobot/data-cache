@@ -2,7 +2,8 @@
 const log = require('./logger')
 
 const { MongoClient } = require('mongodb');
-const connectionString = 'mongodb://mongo-data-rs0.datastore.svc.cluster.local/admin?replicaSet=rs0&ssl=false&compressors=zstd&retryReads=true&retryWrites=true'
+const connectionString = 'mongodb://mongo-data-rs0.datastore.svc.cluster.local/admin?replicaSet=rs0&ssl=false&compressors=snappy&retryReads=true&retryWrites=true'
+console.log(connectionString)
 let mongo = new MongoClient(connectionString), mongo_ready = false, _dbo
 async function init(){
   try{
